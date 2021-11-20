@@ -1,5 +1,6 @@
 #include <array>
 #include <chrono>
+#include <SFML/Audio.hpp>
 #include <SFML/Graphics.hpp>
 
 #include "Headers/Animation.hpp"
@@ -18,9 +19,9 @@ Mario::Mario() :
 	y(0),
 	jump_timer(0),
 	death_timer(MARIO_DEATH_DURATION),
-	walk_animation(MARIO_WALK_ANIMATION_SPEED, CELL_SIZE, "Resources/Images/MarioWalk.png")
+	walk_animation(MARIO_WALK_ANIMATION_SPEED, CELL_SIZE, resourcePath() + "Images/MarioWalk.png")
 {
-	texture.loadFromFile("Resources/Images/MarioIdle.png");
+	texture.loadFromFile(resourcePath() + "Images/MarioIdle.png");
 
 	sprite.setTexture(texture);
 }
@@ -28,6 +29,13 @@ Mario::Mario() :
 bool Mario::get_dead() const
 {
 	return dead;
+}
+
+unsigned char Mario::get_jump_timer(){
+    return this->jump_timer;
+}
+void Mario::set_jump_timer(unsigned char i_value){
+    this->jump_timer = i_value;
 }
 
 float Mario::get_vertical_speed() const
@@ -44,7 +52,30 @@ void Mario::die()
 {
 	dead = 1;
 
-	texture.loadFromFile("Resources/Images/MarioDeath.png");
+	texture.loadFromFile(resourcePath() + "Images/MarioDeath.png");
+    // Load a music to play
+    if (!music.openFromFile(resourcePath() + "audio/die.wav")) {
+        return EXIT_FAILURE;
+    }
+//    std::cout << "died" << std::endl;
+    music.setLoop(false);
+    music.play();
+}
+
+void Mario::start_music(){
+    if (!music.openFromFile(resourcePath() + "audio/bgm.wav")) {
+        return EXIT_FAILURE;
+    }
+    music.setLoop(true);
+    music.play();
+}
+
+void Mario::start_other_music(std::string path){
+    if (!other_music.openFromFile(path)) {
+        return EXIT_FAILURE;
+    }
+    other_music.setLoop(false);
+    other_music.play();
 }
 
 void Mario::draw(sf::RenderWindow& i_window)
@@ -57,13 +88,13 @@ void Mario::draw(sf::RenderWindow& i_window)
 	{
 		if (0 == on_ground)
 		{
-			texture.loadFromFile("Resources/Images/MarioJump.png");
+			texture.loadFromFile(resourcePath() + "Images/MarioJump.png");
 		}
 		else
 		{
 			if (0 == horizontal_speed)
 			{
-				texture.loadFromFile("Resources/Images/MarioIdle.png");
+				texture.loadFromFile(resourcePath() + "Images/MarioIdle.png");
 			}
 			//You have no idea how many hours I spent trying to figure this out.
 			else if ((0 < horizontal_speed && 0 == sf::Keyboard::isKeyPressed(sf::Keyboard::Right) &&
@@ -72,7 +103,7 @@ void Mario::draw(sf::RenderWindow& i_window)
 					  1 == sf::Keyboard::isKeyPressed(sf::Keyboard::Right)))
 			
 			{
-				texture.loadFromFile("Resources/Images/MarioBrake.png");
+				texture.loadFromFile(resourcePath() + "Images/MarioBrake.png");
 			}
 			else
 			{
@@ -111,10 +142,10 @@ void Mario::reset()
 	y = 0;
 
 	jump_timer = 0;
-
+    this->start_music();
 	death_timer = MARIO_DEATH_DURATION;
 
-	texture.loadFromFile("Resources/Images/MarioIdle.png");
+	texture.loadFromFile(resourcePath() + "Images/MarioIdle.png");
 
 	sprite.setTexture(texture);
 
@@ -133,32 +164,60 @@ void Mario::set_vertical_speed(float i_value)
 	vertical_speed = i_value;
 }
 
-void Mario::update(const Map& i_map)
+void Mario::set_horizontal_speed(float i_value)
 {
+    horizontal_speed = i_value;
+}
+
+void Mario::update(const Map& i_map, const sf::Event & event, bool moving)
+{
+//    bool moving = 1;
+    bool move_left = 0;
+    bool move_right = 0;
+    bool move_jump = 0;
 	if (0 == dead)
 	{
-		bool moving = 0;
 
 		unsigned char horizontal_collision;
 		unsigned char vertical_collision;
 
-		on_ground = 0;
-
+		on_ground = 1;
+        // move left
 		if (0 == sf::Keyboard::isKeyPressed(sf::Keyboard::Right) &&
 			1 == sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+        {
+            move_left = 1;
+        }
+        // macOS compatiable
+        else if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Left)
 		{
+            move_left = 1;
+        }
+        if (move_left) {
 			moving = 1;
-
 			horizontal_speed = std::max(horizontal_speed - MARIO_ACCELERATION, -MARIO_WALK_SPEED);
+            last_horizontal_speed = horizontal_speed;
 		}
-
+        // move right
+        
 		if (0 == sf::Keyboard::isKeyPressed(sf::Keyboard::Left) &&
 			1 == sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+        {
+            move_right = 1;
+        }
+        // macOS compatiable
+        else if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Right)
+        {
+            move_right = 1;
+        }
+        if (move_right)
 		{
 			moving = 1;
 
 			horizontal_speed = std::min(MARIO_ACCELERATION + horizontal_speed, MARIO_WALK_SPEED);
+            last_horizontal_speed = horizontal_speed;
 		}
+
 
 		if (0 == moving)
 		{
@@ -182,6 +241,7 @@ void Mario::update(const Map& i_map)
 		//{bottom-right collision, bottom-left collision, top-right collision, top-left collision}
 
 		horizontal_collision = map_collision(horizontal_speed + x, y, {Cell::Brick, Cell::Pipe, Cell::QuestionBlock, Cell::Wall}, i_map);
+//        std::cout << horizontal_collision << "\t speed: " << horizontal_speed << std::endl;
 
 		if (0 < horizontal_collision)
 		{
@@ -208,10 +268,24 @@ void Mario::update(const Map& i_map)
 
 		//Is Mario standing on the ground?
 		vertical_collision = map_collision(x, 1 + y, {Cell::Brick, Cell::Pipe, Cell::QuestionBlock, Cell::Wall}, i_map);
-		
+//        std::cout << "first: " << vertical_collision << std::endl;
 		//I added the <Z> key because some people will say, "I LiKe tO PrEsS ThE <Z> KeY InStEaD Of tHe <Up> KeY!"
-		if (1 == sf::Keyboard::isKeyPressed(sf::Keyboard::Up) || 1 == sf::Keyboard::isKeyPressed(sf::Keyboard::Z))
+		if (1 == sf::Keyboard::isKeyPressed(sf::Keyboard::Up) ||
+            1 == sf::Keyboard::isKeyPressed(sf::Keyboard::Z))
+        {
+            move_jump = 1;
+        } else if  (event.type == sf::Event::KeyPressed &&
+            (event.key.code == sf::Keyboard::Up || event.key.code == sf::Keyboard::Z))
+        {
+            move_jump = 1;
+        }
+        if (move_jump)
 		{
+//            horizontal_speed = 2;
+//            if (horizontal_speed == 0) {
+//                horizontal_speed = last_horizontal_speed * 2;
+//                last_horizontal_speed /= 2;
+//            }
 			if (0 == vertical_speed && 0 < vertical_collision)
 			{
 				vertical_speed = MARIO_JUMP_SPEED;
@@ -237,7 +311,8 @@ void Mario::update(const Map& i_map)
 		}
 
 		vertical_collision = map_collision(x, vertical_speed + y, {Cell::Brick, Cell::Pipe, Cell::QuestionBlock, Cell::Wall}, i_map);
-		
+//        std::cout << "horontal speed: " << horizontal_speed << std::endl;
+//        std::cout << "vetical speed: " << vertical_speed << std::endl;
 		if (0 < vertical_collision)
 		{
 			//3  - 0011 - top collision
@@ -298,9 +373,11 @@ void Mario::update(const Map& i_map)
 			y += vertical_speed;
 		}
 		else if (1 == death_timer)
-		{
+        {
 			vertical_speed = MARIO_JUMP_SPEED;
+            this->reset();
 		}
+        
 
 		death_timer = std::max(0, death_timer - 1);
 	}
